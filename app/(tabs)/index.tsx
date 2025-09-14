@@ -1,68 +1,202 @@
-import { generateAPIUrl } from '@/utils';
+import { ChatHeader } from '@/components/ui/ChatHeader';
+import { ChatMessage } from '@/components/ui/ChatMessage';
+import { Composer } from '@/components/ui/Composer';
+import { MessageSuggestions } from '@/components/ui/MessageSuggestions';
+import { TypingIndicator } from '@/components/ui/TypingIndicator';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
-import { fetch as expoFetch } from 'expo/fetch';
-import { useState } from 'react';
-import { View, TextInput, ScrollView, Text, SafeAreaView } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-export default function App() {
-  const [input, setInput] = useState('');
-  const { messages, error, sendMessage } = useChat({
-    transport: new DefaultChatTransport({
-      fetch: expoFetch as unknown as typeof globalThis.fetch,
-      api: generateAPIUrl('/api/chat'),
-    }),
-    onError: error => console.error(error, 'ERROR'),
-  });
+// Definisanje predloga poruka
+const suggestions = [
+  'Objasni mi kvantnu fiziku',
+  'Napiši pesmu o prirodi',
+  'Pomozi mi sa kodom',
+  'Daj mi recepte za ručak',
+];
 
-  if (error) return <Text>{error.message}</Text>;
+export default function ChatScreen() {
+  const { messages, sendMessage, status, setMessages, error } = useChat();
+  console.log('messages', messages);
+  console.log('status', status);
+  console.log('error', error);
+  const flatListRef = useRef<FlatList>(null);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
+
+  const isStreaming = status === 'streaming';
+
+  useEffect(() => {
+    if (isStreaming && !userHasScrolled && messages.length > 0) {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [messages, isStreaming, userHasScrolled]);
+
+  const handleScroll = (event: any) => {
+    const { contentOffset } = event.nativeEvent;
+    const { contentSize, layoutMeasurement } = event.nativeEvent;
+    const isNearBottom =
+      contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+    setUserHasScrolled(!isNearBottom);
+  };
+
+  const handleSuggestionPress = (suggestion: string) => {
+    sendMessage({
+      text: suggestion,
+    });
+  };
+
+  const handleMenuPress = () => {
+    // Implement menu logic here
+    console.log('Menu pressed');
+  };
+
+  const handleNewChatPress = () => {
+    setMessages([]);
+    console.log('New chat pressed');
+  };
+
+  const handleMorePress = () => {
+    // Implement more options logic here
+    console.log('More options pressed');
+  };
+
+  const handleSendMessage = (message: string) => {
+    sendMessage({
+      text: message,
+    });
+  };
+
+  const renderMessage = ({ item, index }: { item: any; index: number }) => {
+    const reversedIndex = messages.length - 1 - index;
+
+    // Extract text content from UIMessage parts
+    const textParts =
+      item.parts?.filter((part: any) => part.type === 'text') || [];
+    const content = textParts.map((part: any) => part.text).join('');
+
+    const message = {
+      id: item.id,
+      content: content,
+      role: item.role as 'user' | 'assistant',
+      timestamp: new Date(),
+      isStreaming: false,
+    };
+
+    const previousMessage = messages[reversedIndex + 1]
+      ? {
+          id: messages[reversedIndex + 1].id,
+          content:
+            messages[reversedIndex + 1].parts
+              ?.filter((part: any) => part.type === 'text')
+              .map((part: any) => part.text)
+              .join('') || '',
+          role: messages[reversedIndex + 1].role as 'user' | 'assistant',
+          timestamp: new Date(),
+          isStreaming: false,
+        }
+      : undefined;
+
+    return (
+      <ChatMessage
+        message={message}
+        isLast={reversedIndex === messages.length - 1}
+        previousMessage={previousMessage}
+      />
+    );
+  };
+
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyTitle}>How can I help you today?</Text>
+      <MessageSuggestions
+        suggestions={suggestions}
+        onSuggestionPress={handleSuggestionPress}
+        disabled={isStreaming}
+      />
+    </View>
+  );
 
   return (
-    <SafeAreaView style={{ height: '100%' }}>
-      <View
-        style={{
-          height: '95%',
-          display: 'flex',
-          flexDirection: 'column',
-          paddingHorizontal: 8,
-        }}
+    <View style={styles.container}>
+      <StatusBar style="dark" />
+
+      <ChatHeader
+        onMenuPress={handleMenuPress}
+        onNewChatPress={handleNewChatPress}
+        onMorePress={handleMorePress}
+      />
+
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView style={{ flex: 1 }}>
-          {messages.map(m => (
-            <View key={m.id} style={{ marginVertical: 8 }}>
-              <View>
-                <Text style={{ fontWeight: 700 }}>{m.role}</Text>
-                {m.parts.map((part, i) => {
-                  switch (part.type) {
-                    case 'text':
-                      return <Text key={`${m.id}-${i}`}>{part.text}</Text>;
-                    case 'tool-weather':
-                      return (
-                        <Text key={`${m.id}-${i}`}>
-                          {JSON.stringify(part, null, 2)}
-                        </Text>
-                      );
-                  }
-                })}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-        <View style={{ marginTop: 8 }}>
-          <TextInput
-            style={{ backgroundColor: 'white', padding: 8 }}
-            placeholder="Say something..."
-            value={input}
-            onChange={e => setInput(e.nativeEvent.text)}
-            onSubmitEditing={e => {
-              e.preventDefault();
-              sendMessage({ text: input });
-              setInput('');
-            }}
-            autoFocus={true}
-          />
-        </View>
-      </View>
-    </SafeAreaView>
+        <FlatList
+          ref={flatListRef}
+          data={[...messages].reverse()}
+          renderItem={renderMessage}
+          keyExtractor={item => item.id}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.messagesContainer,
+            messages.length === 0 && styles.messagesContainerEmpty,
+          ]}
+          ListEmptyComponent={renderEmptyState}
+        />
+
+        {isStreaming && (
+          <View style={styles.typingContainer}>
+            <TypingIndicator />
+          </View>
+        )}
+
+        <Composer onSendMessage={handleSendMessage} disabled={isStreaming} />
+      </KeyboardAvoidingView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  keyboardContainer: {
+    flex: 1,
+  },
+  messagesContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  messagesContainerEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#1D1D1F',
+    marginBottom: 32,
+    textAlign: 'center',
+  },
+  typingContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+});
